@@ -1,5 +1,5 @@
 import { auth } from "@/auth";
-import { neon } from "@neondatabase/serverless";
+import { withTenant } from "@/db/tenant";
 import bcrypt from "bcryptjs";
 import { NextResponse } from "next/server";
 
@@ -24,38 +24,34 @@ export async function POST(req: Request) {
     );
   }
 
-  const url = process.env.DATABASE_URL;
-  if (!url) {
-    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
-  }
-
   try {
     const hash = await bcrypt.hash(password, 12);
-    const sql = neon(url);
 
-    // Neon HTTP is stateless — set_config must be in the SAME query as the UPDATE
-    // or use a transaction via Pool. Single-statement approach:
-    const result = await sql`
-      WITH ctx AS (
-        SELECT set_config('app.current_org_id', ${session.user.orgId}, true)
-      )
-      UPDATE users
-      SET password_hash = ${hash},
-          must_change_password = false,
-          token_version = token_version + 1,
-          updated_at = now()
-      WHERE id = ${session.user.id}
-        AND org_id = ${session.user.orgId}
-        AND EXISTS (SELECT 1 FROM ctx)
-      RETURNING id
-    `;
-
-    if (!result.length) {
-      return NextResponse.json(
-        { error: "User not found or update blocked." },
-        { status: 404 }
-      );
-    }
+    await withTenant(
+      {
+        user: {
+          id: session.user.id,
+          orgId: session.user.orgId,
+          role: session.user.role,
+          tokenVersion: session.user.tokenVersion,
+        },
+      },
+      async (client) => {
+        const result = await client.query(
+          `UPDATE users
+           SET password_hash = $1,
+               must_change_password = false,
+               token_version = token_version + 1,
+               updated_at = now()
+           WHERE id = $2 AND org_id = $3
+           RETURNING id`,
+          [hash, session.user.id, session.user.orgId]
+        );
+        if (!result.rows.length) {
+          throw new Error("User not found or update blocked");
+        }
+      }
+    );
 
     return NextResponse.json({ ok: true });
   } catch (e) {

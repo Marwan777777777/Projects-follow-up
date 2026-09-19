@@ -1,27 +1,33 @@
 import { auth } from "@/auth";
-import { listOrgUsers } from "@/services/projects";
+import { listEngineers, listOrgUsers } from "@/services/projects";
 import { createEngineer } from "@/services/users";
 import { NextResponse } from "next/server";
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const url = new URL(req.url);
+  const engineersOnly = url.searchParams.get("role") === "Site Engineer";
+
   try {
-    const users = await listOrgUsers({
+    const sessionLike = {
       user: {
         id: session.user.id,
         orgId: session.user.orgId,
         role: session.user.role,
         tokenVersion: session.user.tokenVersion,
       },
-    });
+    };
+    const users = engineersOnly
+      ? await listEngineers(sessionLike)
+      : await listOrgUsers(sessionLike);
     return NextResponse.json({ users });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Failed to list users";
-    return NextResponse.json({ error: msg }, { status: 403 });
+    console.error(e);
+    return NextResponse.json({ error: "Failed to list users" }, { status: 403 });
   }
 }
 
@@ -34,11 +40,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  let body: {
-    fullName?: string;
-    username?: string;
-    email?: string;
-  };
+  let body: { fullName?: string; username?: string; email?: string };
   try {
     body = await req.json();
   } catch {
@@ -64,6 +66,14 @@ export async function POST(req: Request) {
     return NextResponse.json(result, { status: 201 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to create user";
-    return NextResponse.json({ error: msg }, { status: 400 });
+    // Only return safe domain messages
+    const safe =
+      msg.startsWith("Only ") ||
+      msg.includes("required") ||
+      msg.includes("must not") ||
+      msg.includes("duplicate")
+        ? msg
+        : "Failed to create user";
+    return NextResponse.json({ error: safe }, { status: 400 });
   }
 }

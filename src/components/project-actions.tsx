@@ -17,30 +17,27 @@ export function ProjectActions({ projectId }: { projectId: string }) {
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
 
-  // BOQ form
   const [itemNo, setItemNo] = useState("1");
   const [desc, setDesc] = useState("");
   const [unit, setUnit] = useState("EA");
   const [poQty, setPoQty] = useState("1");
 
-  // Assign form
   const [users, setUsers] = useState<UserOption[]>([]);
   const [userId, setUserId] = useState("");
 
-  // Create engineer form
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [tempPass, setTempPass] = useState("");
 
   useEffect(() => {
     if (mode === "assign") {
-      fetch("/api/users")
+      fetch("/api/users?role=Site%20Engineer")
         .then((r) => r.json())
         .then((d) => {
           setUsers(d.users || []);
           if (d.users?.[0]) setUserId(d.users[0].id);
         })
-        .catch(() => setError("Failed to load users"));
+        .catch(() => setError("Failed to load engineers"));
     }
   }, [mode]);
 
@@ -48,19 +45,18 @@ export function ProjectActions({ projectId }: { projectId: string }) {
     e.preventDefault();
     setError("");
     setLoading(true);
+    const qty = Number(poQty);
+    if (!Number.isFinite(qty) || qty < 0) {
+      setError("Invalid quantity");
+      setLoading(false);
+      return;
+    }
     try {
       const res = await fetch(`/api/projects/${projectId}/boq`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: [
-            {
-              itemNo,
-              itemDescription: desc,
-              unit,
-              poQty: Number(poQty),
-            },
-          ],
+          items: [{ itemNo, itemDescription: desc, unit, poQty: qty }],
         }),
       });
       const data = await res.json();
@@ -224,7 +220,7 @@ export function ProjectActions({ projectId }: { projectId: string }) {
       {mode === "assign" && (
         <form onSubmit={submitAssign} className="rounded border border-zinc-200 bg-zinc-50 p-2 space-y-2 text-xs">
           {users.length === 0 ? (
-            <p className="text-zinc-500">No users. Create an engineer first.</p>
+            <p className="text-zinc-500">No engineers. Create one first.</p>
           ) : (
             <>
               <select
@@ -234,7 +230,7 @@ export function ProjectActions({ projectId }: { projectId: string }) {
               >
                 {users.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.full_name} ({u.username}) — {u.role}
+                    {u.full_name} ({u.username})
                   </option>
                 ))}
               </select>
