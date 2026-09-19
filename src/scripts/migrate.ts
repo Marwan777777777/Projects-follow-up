@@ -2,19 +2,30 @@
  * Apply Slice 1 foundation migration.
  * Uses Neon HTTP driver (tagged templates only).
  *
- * Usage:
+ * Usage (PowerShell):
+ *   $env:DATABASE_URL="postgresql://..."
  *   npx tsx src/scripts/migrate.ts
+ *
+ * Or create .env.local with DATABASE_URL=...
  */
 
 import { neon } from "@neondatabase/serverless";
-import { config } from "dotenv";
 
-config({ path: ".env.local" });
+// Optional dotenv – works if installed, ignored otherwise
+try {
+  const { config } = await import("dotenv");
+  config({ path: ".env.local" });
+} catch {
+  // fine – user can set process.env.DATABASE_URL directly
+}
 
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) {
-    console.error("DATABASE_URL required in .env.local");
+    console.error("DATABASE_URL required.");
+    console.error("On Windows PowerShell run this first:");
+    console.error('  $env:DATABASE_URL="postgresql://neondb_owner:...@...neon.tech/neondb?sslmode=require"');
+    console.error("Then re-run: npx tsx src/scripts/migrate.ts");
     process.exit(1);
   }
 
@@ -288,7 +299,6 @@ async function main() {
         RETURN;
       END IF;
 
-      -- Critical: set tenant context so FORCE RLS allows the read
       PERFORM set_config('app.current_org_id', v_org_id::text, true);
 
       v_is_email := position('@' in p_identifier) > 0;
