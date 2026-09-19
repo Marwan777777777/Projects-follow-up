@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { listProjects } from "@/services/projects";
 import { CreateProjectForm } from "@/components/create-project-form";
+import { ProjectActions } from "@/components/project-actions";
 
 export default async function ProjectsPage() {
   const session = await auth();
@@ -44,18 +45,19 @@ export default async function ProjectsPage() {
               <th className="px-4 py-3">Phase</th>
               <th className="px-4 py-3">BOQ</th>
               <th className="px-4 py-3">Assignees</th>
+              <th className="px-4 py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {projects.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-zinc-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">
                   No projects yet. Create one above.
                 </td>
               </tr>
             ) : (
               projects.map((p: Record<string, unknown>) => (
-                <tr key={String(p.id)} className="border-b border-zinc-100 last:border-0">
+                <tr key={String(p.id)} className="border-b border-zinc-100 last:border-0 align-top">
                   <td className="px-4 py-3 font-medium">{String(p.project_name)}</td>
                   <td className="px-4 py-3 text-zinc-600">{String(p.client_name)}</td>
                   <td className="px-4 py-3">
@@ -66,6 +68,9 @@ export default async function ProjectsPage() {
                   <td className="px-4 py-3 text-zinc-600">{String(p.current_phase)}</td>
                   <td className="px-4 py-3">{String(p.boq_count)}</td>
                   <td className="px-4 py-3">{String(p.assignee_count)}</td>
+                  <td className="px-4 py-3">
+                    <ProjectActions projectId={String(p.id)} />
+                  </td>
                 </tr>
               ))
             )}
