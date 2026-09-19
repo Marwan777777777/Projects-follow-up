@@ -1,23 +1,19 @@
 /**
  * Cross-tenant isolation test (Slice 1)
  *
- * Requires:
- * - DATABASE_URL pointing at a test Neon database
- * - Migration applied
- *
- * Run:
- *   $env:DATABASE_URL="..."   # PowerShell
+ * Usage (PowerShell):
+ *   $env:DATABASE_URL="postgresql://..."
  *   npx tsx src/tests/isolation.test.ts
  */
 
 import { neon, Pool } from "@neondatabase/serverless";
 
-// Load .env.local if dotenv is available, otherwise rely on process.env
+// Load .env.local if present (no top-level await)
 try {
-  const { config } = await import("dotenv");
-  config({ path: ".env.local" });
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("dotenv").config({ path: ".env.local" });
 } catch {
-  // dotenv not installed or not needed if env is already set
+  // dotenv optional
 }
 
 const connectionString = process.env.DATABASE_URL;
@@ -30,10 +26,10 @@ if (!connectionString) {
 
 async function assert(condition: boolean, message: string) {
   if (!condition) {
-    console.error("❌ FAIL:", message);
+    console.error("\u274c FAIL:", message);
     process.exit(1);
   }
-  console.log("✅", message);
+  console.log("\u2705", message);
 }
 
 async function main() {
@@ -42,7 +38,6 @@ async function main() {
 
   console.log("\n=== Slice 1 Isolation Tests ===\n");
 
-  // Seed two orgs if needed (control-plane)
   let orgA = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-a' LIMIT 1`)[0];
   let orgB = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-b' LIMIT 1`)[0];
 
@@ -62,7 +57,6 @@ async function main() {
   const orgAId = orgA.id as string;
   const orgBId = orgB.id as string;
 
-  // Seed one user + one project per org (as owner, setting GUC)
   await sql`SELECT set_config('app.current_org_id', ${orgAId}, true)`;
   const existingA = await sql`SELECT id FROM users WHERE org_id = ${orgAId} LIMIT 1`;
   if (existingA.length === 0) {
@@ -89,19 +83,19 @@ async function main() {
     `;
   }
 
-  // --- Test 1: no matching tenant context → zero rows ---
+  // Test 1: no matching tenant context → zero rows
   {
     const client = await pool.connect();
     try {
       await client.query(`SELECT set_config('app.current_org_id', '00000000-0000-0000-0000-000000000000', true)`);
       const res = await client.query(`SELECT count(*)::int AS c FROM users`);
-      await assert(res.rows[0].c === 0, "No matching tenant context → zero users visible");
+      await assert(res.rows[0].c === 0, "No matching tenant context \u2192 zero users visible");
     } finally {
       client.release();
     }
   }
 
-  // --- Test 2: org A context sees only org A ---
+  // Test 2: org A context sees only org A
   {
     const client = await pool.connect();
     try {
@@ -125,7 +119,7 @@ async function main() {
     }
   }
 
-  // --- Test 3: org B context cannot see org A ---
+  // Test 3: org B context cannot see org A
   {
     const client = await pool.connect();
     try {
@@ -142,7 +136,7 @@ async function main() {
     }
   }
 
-  // --- Test 4: INSERT into wrong tenant is blocked by WITH CHECK ---
+  // Test 4: INSERT into wrong tenant is blocked by WITH CHECK
   {
     const client = await pool.connect();
     try {
