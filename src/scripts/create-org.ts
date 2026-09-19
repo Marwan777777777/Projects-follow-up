@@ -1,15 +1,20 @@
 /**
  * scripts/create-org
  * Bootstrap an organization + first Admin.
- * Run with migrator / owner connection (bypasses RLS for control-plane inserts).
  *
  * Usage:
- *   DATABASE_URL=... npx tsx src/scripts/create-org.ts --name "Acme ELV" --slug acme --admin-name "Admin User" --admin-username admin --admin-email admin@acme.com
+ *   npx tsx src/scripts/create-org.ts --name "Demo ELV" --slug demo --admin-name "Admin" --admin-username admin --admin-email admin@demo.com
+ *
+ * DATABASE_URL can come from:
+ *   1. --database-url flag
+ *   2. process.env.DATABASE_URL
+ *   3. .env.local file
  */
 
 import { neon } from "@neondatabase/serverless";
-import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
+import { readFileSync, existsSync } from "fs";
+import { resolve } from "path";
 
 function arg(name: string, fallback?: string): string {
   const idx = process.argv.indexOf(`--${name}`);
@@ -21,10 +26,48 @@ function arg(name: string, fallback?: string): string {
   return process.argv[idx + 1];
 }
 
+function loadEnvLocal() {
+  const candidates = [
+    resolve(process.cwd(), ".env.local"),
+    resolve(process.cwd(), ".env"),
+  ];
+  for (const file of candidates) {
+    if (!existsSync(file)) continue;
+    const text = readFileSync(file, "utf8");
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq === -1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let val = trimmed.slice(eq + 1).trim();
+      // strip surrounding quotes
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (!process.env[key]) {
+        process.env[key] = val;
+      }
+    }
+    console.log(`Loaded env from ${file}`);
+    return;
+  }
+}
+
 async function main() {
-  const connectionString = process.env.DATABASE_URL;
+  loadEnvLocal();
+
+  const connectionString =
+    arg("database-url", "") || process.env.DATABASE_URL || "";
+
   if (!connectionString) {
-    console.error("DATABASE_URL is required");
+    console.error("DATABASE_URL is required.");
+    console.error("Either:");
+    console.error("  1. Create .env.local with DATABASE_URL=...");
+    console.error("  2. Pass --database-url \"postgresql://...\"");
     process.exit(1);
   }
 
@@ -34,7 +77,6 @@ async function main() {
   const adminUsername = arg("admin-username").toLowerCase().trim();
   const adminEmail = arg("admin-email", "").toLowerCase().trim() || null;
 
-  // Basic slug validation (full reserved list enforced later)
   if (!/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])?$/.test(slug)) {
     console.error("Invalid slug format");
     process.exit(1);
@@ -49,21 +91,26 @@ async function main() {
     process.exit(1);
   }
 
-  // Temporary password — must be changed on first login
+  // Dynamic import bcrypt so missing package gives a clear error
+  let bcrypt: typeof import("bcryptjs");
+  try {
+    bcrypt = await import("bcryptjs");
+  } catch {
+    console.error("bcryptjs is not installed. Run: npm install bcryptjs --legacy-peer-deps");
+    process.exit(1);
+  }
+
   const tempPassword = randomBytes(12).toString("base64url");
   const passwordHash = await bcrypt.hash(tempPassword, 12);
 
   const sql = neon(connectionString);
 
-  // Control-plane insert (organizations has no RLS)
   const [org] = await sql`
     INSERT INTO organizations (name, slug, plan_tier, status, timezone, compliance_cutoff_time, working_days)
     VALUES (${name}, ${slug}, 'standard', 'Active', 'Asia/Dubai', '18:00', '[1,2,3,4,5]'::jsonb)
     RETURNING id, name, slug
   `;
 
-  // First Admin — must run with tenant context or as owner
-  // For bootstrap we insert as owner (migrator). RLS is FORCE, so we set GUC.
   await sql`SELECT set_config('app.current_org_id', ${org.id}::text, true)`;
 
   const [user] = await sql`
@@ -77,7 +124,7 @@ async function main() {
     RETURNING id, username, email, role
   `;
 
-  console.log("\n✅ Organization created");
+  console.log("\n\u2705 Organization created");
   console.log("----------------------------------------");
   console.log(`  Org ID:     ${org.id}`);
   console.log(`  Name:       ${org.name}`);
