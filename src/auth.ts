@@ -1,6 +1,9 @@
 /**
  * Auth.js (NextAuth v5) — Credentials + JWT
  * Org-scoped identity: org code + username/email + password
+ *
+ * Kill-switch path: auth_session_check (SECURITY DEFINER).
+ * Never query users/organizations directly from app code for revocation.
  */
 
 import NextAuth from "next-auth";
@@ -71,17 +74,37 @@ async function lookupUser(orgSlug: string, identifier: string) {
         must_change_password: boolean;
         token_version: number;
         organization_status: string;
+        full_name: string;
       }
     | undefined;
 }
 
-async function getUserFullName(userId: string, orgId: string) {
+/** Kill-switch: SECURITY DEFINER only — never a direct owner SELECT. */
+async function sessionCheck(
+  userId: string,
+  orgId: string,
+  tokenVersion: number
+) {
   const url = process.env.DATABASE_URL;
-  if (!url) return "User";
+  if (!url) return null;
   const sql = neon(url);
-  await sql`SELECT set_config('app.current_org_id', ${orgId}, true)`;
-  const rows = await sql`SELECT full_name FROM users WHERE id = ${userId} LIMIT 1`;
-  return (rows[0]?.full_name as string) || "User";
+
+  const rows = await sql`
+    SELECT * FROM auth_session_check(
+      ${userId}::uuid,
+      ${orgId}::uuid,
+      ${tokenVersion}::integer
+    )
+  `;
+  return rows[0] as
+    | {
+        ok: boolean;
+        must_change_password: boolean;
+        role: string;
+        org_slug: string;
+        full_name: string;
+      }
+    | undefined;
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -98,7 +121,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!parsed.success) return null;
 
         const { orgSlug, identifier, password } = parsed.data;
-        const row = await lookupUser(orgSlug.toLowerCase().trim(), identifier.trim());
+        const row = await lookupUser(
+          orgSlug.toLowerCase().trim(),
+          identifier.trim()
+        );
 
         if (!row) return null;
         if (row.organization_status !== "Active") return null;
@@ -107,8 +133,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const ok = await bcrypt.compare(password, row.password_hash);
         if (!ok) return null;
 
-        const fullName = await getUserFullName(row.id, row.org_id);
-
         return {
           id: row.id,
           orgId: row.org_id,
@@ -116,8 +140,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           role: row.role as AppRole,
           tokenVersion: row.token_version,
           mustChangePassword: row.must_change_password,
-          fullName,
-          name: fullName,
+          fullName: row.full_name || "User",
+          name: row.full_name || "User",
           email: identifier.includes("@") ? identifier : null,
         };
       },
@@ -143,45 +167,26 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.fullName = user.fullName;
       }
 
-      if (token.id && token.orgId) {
+      if (token.id && token.orgId && typeof token.tokenVersion === "number") {
         try {
-          const url = process.env.DATABASE_URL;
-          if (url) {
-            const sql = neon(url);
-            const rows = await sql`
-              SELECT u.status AS user_status, u.token_version, u.must_change_password,
-                     u.role, o.status AS org_status, o.slug
-              FROM users u
-              JOIN organizations o ON o.id = u.org_id
-              WHERE u.id = ${token.id} AND u.org_id = ${token.orgId}
-              LIMIT 1
-            `;
-            const row = rows[0] as
-              | {
-                  user_status: string;
-                  token_version: number;
-                  must_change_password: boolean;
-                  role: string;
-                  org_status: string;
-                  slug: string;
-                }
-              | undefined;
+          const row = await sessionCheck(
+            token.id,
+            token.orgId,
+            token.tokenVersion
+          );
 
-            if (
-              !row ||
-              row.user_status !== "Active" ||
-              row.org_status !== "Active" ||
-              row.token_version !== token.tokenVersion
-            ) {
-              return { ...token, id: "", orgId: "" } as typeof token;
-            }
-
-            token.mustChangePassword = row.must_change_password;
-            token.role = row.role as AppRole;
-            token.orgSlug = row.slug;
+          if (!row || !row.ok) {
+            // Invalidate — disabled user, suspended org, or token_version mismatch
+            return { ...token, id: "", orgId: "" } as typeof token;
           }
+
+          token.mustChangePassword = row.must_change_password;
+          token.role = row.role as AppRole;
+          token.orgSlug = row.org_slug;
+          if (row.full_name) token.fullName = row.full_name;
         } catch {
-          // keep token on transient DB errors
+          // Fail closed on unexpected errors: invalidate session
+          return { ...token, id: "", orgId: "" } as typeof token;
         }
       }
 
