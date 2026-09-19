@@ -69,7 +69,10 @@ async function main() {
     console.log("app_user: nobypassrls=true, not superuser");
   }
 
-  // Seed two orgs + data as owner (control-plane / bootstrap)
+  // Allow current user (owner) to SET ROLE app_user
+  await sql`GRANT app_user TO CURRENT_USER`;
+
+  // Seed two orgs + data as owner
   let orgA = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-a' LIMIT 1`)[0];
   let orgB = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-b' LIMIT 1`)[0];
 
@@ -91,7 +94,6 @@ async function main() {
   console.log(`Org A: ${orgAId}`);
   console.log(`Org B: ${orgBId}`);
 
-  // Seed under tenant context (owner still needed for insert if policies block)
   await sql`SELECT set_config('app.current_org_id', ${orgAId}, true)`;
   const existingA = await sql`SELECT id FROM users WHERE org_id = ${orgAId} LIMIT 1`;
   if (existingA.length === 0) {
@@ -121,7 +123,6 @@ async function main() {
   // ========== All isolation checks run as app_user ==========
   const client = await pool.connect();
   try {
-    // Switch to app_user so FORCE RLS actually applies
     await client.query(`SET ROLE app_user`);
     console.log("\nSwitched to role: app_user\n");
 
@@ -188,7 +189,6 @@ async function main() {
       await assert(blocked, "WITH CHECK blocks INSERT of org B row under org A context");
     }
 
-    // Reset role
     await client.query(`RESET ROLE`);
   } finally {
     client.release();
