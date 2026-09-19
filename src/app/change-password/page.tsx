@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { signOut } from "next-auth/react";
 
 export default function ChangePasswordPage() {
   const router = useRouter();
@@ -9,6 +10,7 @@ export default function ChangePasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [done, setDone] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -30,18 +32,39 @@ export default function ChangePasswordPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password }),
       });
-      const data = await res.json();
+
+      let data: { error?: string; ok?: boolean } = {};
+      try {
+        data = await res.json();
+      } catch {
+        setError("Unexpected server response.");
+        setLoading(false);
+        return;
+      }
+
       if (!res.ok) {
         setError(data.error || "Failed to change password.");
         setLoading(false);
         return;
       }
-      router.push("/dashboard");
+
+      setDone(true);
+      // JWT still has old mustChangePassword / tokenVersion — force re-login
+      await signOut({ redirect: false });
+      router.push("/login/demo");
       router.refresh();
     } catch {
       setError("Something went wrong.");
       setLoading(false);
     }
+  }
+
+  if (done) {
+    return (
+      <main className="min-h-dvh flex flex-col items-center justify-center bg-zinc-50 px-4">
+        <p className="text-sm text-zinc-600">Password updated. Redirecting to login\u2026</p>
+      </main>
+    );
   }
 
   return (
