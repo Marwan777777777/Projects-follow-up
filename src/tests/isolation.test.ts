@@ -1,6 +1,9 @@
 /**
  * Cross-tenant isolation test (Slice 1)
  *
+ * Critical: the Neon owner role bypasses RLS (even with FORCE RLS).
+ * All isolation assertions run after SET ROLE app_user.
+ *
  * Usage (PowerShell):
  *   $env:DATABASE_URL="postgresql://..."
  *   npx tsx src/tests/isolation.test.ts
@@ -17,8 +20,7 @@ try {
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  console.error("DATABASE_URL required. On Windows PowerShell:");
-  console.error('  $env:DATABASE_URL="postgresql://..."');
+  console.error("DATABASE_URL required.");
   process.exit(1);
 }
 
@@ -36,7 +38,7 @@ async function main() {
 
   console.log("\n=== Slice 1 Isolation Tests ===\n");
 
-  // Diagnostic: confirm FORCE RLS is on
+  // Confirm FORCE RLS
   {
     const rls = await sql`
       SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS force_rls
@@ -54,7 +56,20 @@ async function main() {
     }
   }
 
-  // Seed two orgs
+  // Confirm app_user exists and has NOBYPASSRLS
+  {
+    const roles = await sql`
+      SELECT rolname, rolbypassrls, rolsuper
+      FROM pg_roles
+      WHERE rolname = 'app_user'
+    `;
+    await assert(roles.length === 1, "app_user role exists");
+    await assert(roles[0].rolbypassrls === false, "app_user has NOBYPASSRLS");
+    await assert(roles[0].rolsuper === false, "app_user is not superuser");
+    console.log("app_user: nobypassrls=true, not superuser");
+  }
+
+  // Seed two orgs + data as owner (control-plane / bootstrap)
   let orgA = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-a' LIMIT 1`)[0];
   let orgB = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-b' LIMIT 1`)[0];
 
@@ -76,7 +91,7 @@ async function main() {
   console.log(`Org A: ${orgAId}`);
   console.log(`Org B: ${orgBId}`);
 
-  // Seed users/projects under correct tenant context
+  // Seed under tenant context (owner still needed for insert if policies block)
   await sql`SELECT set_config('app.current_org_id', ${orgAId}, true)`;
   const existingA = await sql`SELECT id FROM users WHERE org_id = ${orgAId} LIMIT 1`;
   if (existingA.length === 0) {
@@ -103,32 +118,28 @@ async function main() {
     `;
   }
 
-  // --- Test 1: non-matching tenant context returns zero rows ---
-  {
-    const client = await pool.connect();
-    try {
+  // ========== All isolation checks run as app_user ==========
+  const client = await pool.connect();
+  try {
+    // Switch to app_user so FORCE RLS actually applies
+    await client.query(`SET ROLE app_user`);
+    console.log("\nSwitched to role: app_user\n");
+
+    // Test 1: non-matching tenant context \u2192 zero rows
+    {
       await client.query("BEGIN");
-      // Set a UUID that matches no organization
       await client.query(
         `SELECT set_config('app.current_org_id', '00000000-0000-0000-0000-000000000099', true)`
       );
       const res = await client.query(`SELECT count(*)::int AS c FROM users`);
       const count = res.rows[0].c;
-      console.log(`  (diagnostic) users visible with fake org context: ${count}`);
+      console.log(`  (diagnostic) users visible with fake org: ${count}`);
       await assert(count === 0, "Non-matching tenant context \u2192 zero users visible");
       await client.query("COMMIT");
-    } catch (e) {
-      await client.query("ROLLBACK").catch(() => {});
-      throw e;
-    } finally {
-      client.release();
     }
-  }
 
-  // --- Test 2: org A context sees only org A ---
-  {
-    const client = await pool.connect();
-    try {
+    // Test 2: org A context sees only org A
+    {
       await client.query("BEGIN");
       await client.query(`SELECT set_config('app.current_org_id', $1, true)`, [orgAId]);
       const users = await client.query(`SELECT id, org_id FROM users`);
@@ -146,15 +157,10 @@ async function main() {
         "Org A context: all projects belong to org A"
       );
       await assert(users.rows.length >= 1, "Org A context: at least one user visible");
-    } finally {
-      client.release();
     }
-  }
 
-  // --- Test 3: org B context cannot see org A rows ---
-  {
-    const client = await pool.connect();
-    try {
+    // Test 3: org B context cannot see org A
+    {
       await client.query("BEGIN");
       await client.query(`SELECT set_config('app.current_org_id', $1, true)`, [orgBId]);
       const users = await client.query(`SELECT org_id FROM users WHERE org_id = $1`, [orgAId]);
@@ -163,15 +169,10 @@ async function main() {
 
       await assert(users.rows.length === 0, "Org B context: cannot SELECT org A users");
       await assert(projects.rows.length === 0, "Org B context: cannot SELECT org A projects");
-    } finally {
-      client.release();
     }
-  }
 
-  // --- Test 4: WITH CHECK blocks cross-tenant INSERT ---
-  {
-    const client = await pool.connect();
-    try {
+    // Test 4: WITH CHECK blocks cross-tenant INSERT
+    {
       await client.query("BEGIN");
       await client.query(`SELECT set_config('app.current_org_id', $1, true)`, [orgAId]);
       let blocked = false;
@@ -185,9 +186,12 @@ async function main() {
       }
       await client.query("ROLLBACK");
       await assert(blocked, "WITH CHECK blocks INSERT of org B row under org A context");
-    } finally {
-      client.release();
     }
+
+    // Reset role
+    await client.query(`RESET ROLE`);
+  } finally {
+    client.release();
   }
 
   console.log("\n=== All isolation tests passed ===\n");
