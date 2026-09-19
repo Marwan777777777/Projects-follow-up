@@ -8,19 +8,17 @@
 
 import { neon, Pool } from "@neondatabase/serverless";
 
-// Load .env.local if present (no top-level await)
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require("dotenv").config({ path: ".env.local" });
 } catch {
-  // dotenv optional
+  // optional
 }
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
-  console.error("DATABASE_URL required. On Windows PowerShell run:");
+  console.error("DATABASE_URL required. On Windows PowerShell:");
   console.error('  $env:DATABASE_URL="postgresql://..."');
-  console.error("Then re-run this command.");
   process.exit(1);
 }
 
@@ -38,6 +36,25 @@ async function main() {
 
   console.log("\n=== Slice 1 Isolation Tests ===\n");
 
+  // Diagnostic: confirm FORCE RLS is on
+  {
+    const rls = await sql`
+      SELECT c.relname, c.relrowsecurity AS rls, c.relforcerowsecurity AS force_rls
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname IN ('users', 'projects', 'boq_items', 'activity_log', 'project_assignments')
+      ORDER BY c.relname
+    `;
+    console.log("RLS status:");
+    for (const row of rls) {
+      console.log(`  ${row.relname}: rls=${row.rls} force_rls=${row.force_rls}`);
+      await assert(row.rls === true, `${row.relname} has RLS enabled`);
+      await assert(row.force_rls === true, `${row.relname} has FORCE RLS`);
+    }
+  }
+
+  // Seed two orgs
   let orgA = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-a' LIMIT 1`)[0];
   let orgB = (await sql`SELECT id FROM organizations WHERE slug = 'test-org-b' LIMIT 1`)[0];
 
@@ -56,7 +73,10 @@ async function main() {
 
   const orgAId = orgA.id as string;
   const orgBId = orgB.id as string;
+  console.log(`Org A: ${orgAId}`);
+  console.log(`Org B: ${orgBId}`);
 
+  // Seed users/projects under correct tenant context
   await sql`SELECT set_config('app.current_org_id', ${orgAId}, true)`;
   const existingA = await sql`SELECT id FROM users WHERE org_id = ${orgAId} LIMIT 1`;
   if (existingA.length === 0) {
@@ -83,27 +103,39 @@ async function main() {
     `;
   }
 
-  // Test 1: no matching tenant context → zero rows
+  // --- Test 1: non-matching tenant context returns zero rows ---
   {
     const client = await pool.connect();
     try {
-      await client.query(`SELECT set_config('app.current_org_id', '00000000-0000-0000-0000-000000000000', true)`);
+      await client.query("BEGIN");
+      // Set a UUID that matches no organization
+      await client.query(
+        `SELECT set_config('app.current_org_id', '00000000-0000-0000-0000-000000000099', true)`
+      );
       const res = await client.query(`SELECT count(*)::int AS c FROM users`);
-      await assert(res.rows[0].c === 0, "No matching tenant context \u2192 zero users visible");
+      const count = res.rows[0].c;
+      console.log(`  (diagnostic) users visible with fake org context: ${count}`);
+      await assert(count === 0, "Non-matching tenant context \u2192 zero users visible");
+      await client.query("COMMIT");
+    } catch (e) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw e;
     } finally {
       client.release();
     }
   }
 
-  // Test 2: org A context sees only org A
+  // --- Test 2: org A context sees only org A ---
   {
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query(`SELECT set_config('app.current_org_id', $1, true)`, [orgAId]);
-      const users = await client.query(`SELECT org_id FROM users`);
-      const projects = await client.query(`SELECT org_id FROM projects`);
+      const users = await client.query(`SELECT id, org_id FROM users`);
+      const projects = await client.query(`SELECT id, org_id FROM projects`);
       await client.query("COMMIT");
+
+      console.log(`  (diagnostic) org A sees ${users.rows.length} users, ${projects.rows.length} projects`);
 
       await assert(
         users.rows.every((r: any) => r.org_id === orgAId),
@@ -119,7 +151,7 @@ async function main() {
     }
   }
 
-  // Test 3: org B context cannot see org A
+  // --- Test 3: org B context cannot see org A rows ---
   {
     const client = await pool.connect();
     try {
@@ -136,7 +168,7 @@ async function main() {
     }
   }
 
-  // Test 4: INSERT into wrong tenant is blocked by WITH CHECK
+  // --- Test 4: WITH CHECK blocks cross-tenant INSERT ---
   {
     const client = await pool.connect();
     try {
