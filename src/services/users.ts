@@ -1,5 +1,5 @@
 /**
- * User mutations (Slice 2) — create Site Engineer for assignment testing
+ * User mutations — create Site Engineer
  */
 
 import { randomBytes } from "crypto";
@@ -34,11 +34,14 @@ export async function createEngineer(
   if (!fullName || !username) {
     throw new Error("fullName and username are required");
   }
+  if (username.includes("@")) {
+    throw new Error("Username must not contain @");
+  }
 
   const tempPassword = randomBytes(9).toString("base64url");
   const passwordHash = await bcrypt.hash(tempPassword, 12);
 
-  return withTenant(session, async (_db, client) => {
+  return withTenant(session, async (client) => {
     const res = await client.query(
       `INSERT INTO users (
          org_id, full_name, username, password_hash, email, role, status, must_change_password
@@ -54,7 +57,7 @@ export async function createEngineer(
     );
     const user = res.rows[0];
 
-    await audit(client, session.user.id, "user", user.id, "created", {
+    await audit(client, session.user.id, "user", user.id, "create", {
       username: user.username,
       role: user.role,
     });

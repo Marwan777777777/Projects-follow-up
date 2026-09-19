@@ -1,14 +1,13 @@
 /**
  * Tenant context helpers
  *
- * withTenant(session, cb)     — authenticated request path
- * withOrgContext(orgId, cb)   — trusted internal path (cron, pre-auth, bootstrap)
+ * CRITICAL: after BEGIN we SET LOCAL ROLE app_user so FORCE RLS applies.
+ * Owner connection alone bypasses RLS even with FORCE (Neon superuser).
  *
- * Both set transaction-local GUC: app.current_org_id
- * FORCE RLS policies use current_setting('app.current_org_id', true)::uuid
+ * Long-term: dedicated app_login role + separate DATABASE_URL (no owner in app).
  */
 
-import { createTenantPool, createTenantDb, type TenantDb } from "./client";
+import { createTenantPool } from "./client";
 import type { PoolClient } from "@neondatabase/serverless";
 
 export type SessionLike = {
@@ -26,23 +25,22 @@ export type SessionLike = {
  */
 export async function withTenant<T>(
   session: SessionLike,
-  callback: (db: TenantDb, client: PoolClient) => Promise<T>
+  callback: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   if (!session?.user?.orgId) {
     throw new Error("withTenant requires a valid session with orgId");
   }
-  return withOrgContext(session.user.orgId, callback);
+  return withOrgContext(session.user.orgId, session.user.id, callback);
 }
 
 /**
  * Trusted internal tenant path.
- * Callers are limited to: cron, pre-auth modules, bootstrap, housekeeping.
- * orgId must originate from control-plane or other trusted server source.
- * Must NOT be reachable from ordinary feature code with client-supplied orgId.
+ * Sets transaction-local GUC + SET LOCAL ROLE app_user.
  */
 export async function withOrgContext<T>(
   orgId: string,
-  callback: (db: TenantDb, client: PoolClient) => Promise<T>
+  actorId: string | null,
+  callback: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   if (!orgId || typeof orgId !== "string") {
     throw new Error("withOrgContext requires a trusted orgId");
@@ -53,17 +51,39 @@ export async function withOrgContext<T>(
 
   try {
     await client.query("BEGIN");
-    // Transaction-local tenant context (true = local to transaction)
-    await client.query(`SELECT set_config('app.current_org_id', $1, true)`, [orgId]);
 
-    const db = createTenantDb(pool);
+    // Ensure we can assume app_user (owner must be a member)
+    await client.query(`GRANT app_user TO CURRENT_USER`).catch(() => {
+      /* already granted */
+    });
 
-    const result = await callback(db, client);
+    // FORCE RLS only applies once we are not the bypassing owner
+    await client.query(`SET LOCAL ROLE app_user`);
+
+    // Transaction-local tenant context
+    await client.query(
+      `SELECT set_config('app.current_org_id', $1, true)`,
+      [orgId]
+    );
+
+    // Actor for audit integrity (read inside append_activity_log later)
+    if (actorId) {
+      await client.query(
+        `SELECT set_config('app.current_user_id', $1, true)`,
+        [actorId]
+      );
+    }
+
+    const result = await callback(client);
 
     await client.query("COMMIT");
     return result;
   } catch (err) {
-    await client.query("ROLLBACK");
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
     throw err;
   } finally {
     client.release();

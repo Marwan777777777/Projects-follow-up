@@ -1,6 +1,6 @@
 /**
- * Project mutations (Slice 2)
- * All writes go through withTenant + append_activity_log
+ * Project mutations (Slice 2 / 2.5)
+ * All writes go through withTenant (SET ROLE app_user + GUC) + append_activity_log
  */
 
 import type { PoolClient } from "@neondatabase/serverless";
@@ -52,7 +52,7 @@ export async function createProject(
     throw new Error("projectName and clientName are required");
   }
 
-  return withTenant(session, async (_db, client) => {
+  return withTenant(session, async (client) => {
     const res = await client.query(
       `INSERT INTO projects (
          org_id, project_name, client_name, location, po_number,
@@ -72,7 +72,7 @@ export async function createProject(
     );
     const project = res.rows[0];
 
-    await audit(client, session.user.id, "project", project.id, "created", {
+    await audit(client, session.user.id, "project", project.id, "create", {
       project_name: project.project_name,
       client_name: project.client_name,
     });
@@ -91,17 +91,19 @@ export async function addBoqItems(
   }
   if (!items.length) throw new Error("At least one BOQ item required");
 
-  return withTenant(session, async (_db, client) => {
-    // Verify project belongs to this tenant (RLS also enforces)
-    const proj = await client.query(
-      `SELECT id FROM projects WHERE id = $1`,
-      [projectId]
-    );
+  return withTenant(session, async (client) => {
+    const proj = await client.query(`SELECT id FROM projects WHERE id = $1`, [
+      projectId,
+    ]);
     if (!proj.rows.length) throw new Error("Project not found");
 
     const inserted = [];
     for (let i = 0; i < items.length; i++) {
       const line = items[i];
+      const qty = Number(line.poQty);
+      if (!Number.isFinite(qty) || qty < 0) {
+        throw new Error(`Invalid poQty for item ${line.itemNo}`);
+      }
       const r = await client.query(
         `INSERT INTO boq_items (
            org_id, project_id, sort_order, item_no, item_description, unit, po_qty
@@ -114,16 +116,21 @@ export async function addBoqItems(
           line.itemNo.trim(),
           line.itemDescription.trim(),
           line.unit || "EA",
-          line.poQty,
+          qty,
         ]
       );
-      inserted.push(r.rows[0]);
-    }
+      const row = r.rows[0];
+      inserted.push(row);
 
-    await audit(client, session.user.id, "project", projectId, "boq_items_added", {
-      count: inserted.length,
-      items: inserted.map((x) => x.item_no),
-    });
+      // One audit row per BOQ item with snapshot
+      await audit(client, session.user.id, "boq_item", row.id, "create", {
+        project_id: projectId,
+        item_no: row.item_no,
+        item_description: row.item_description,
+        unit: row.unit,
+        po_qty: row.po_qty,
+      });
+    }
 
     return inserted;
   });
@@ -138,7 +145,7 @@ export async function assignEngineer(
     throw new Error("Only Admin can assign engineers");
   }
 
-  return withTenant(session, async (_db, client) => {
+  return withTenant(session, async (client) => {
     const proj = await client.query(`SELECT id FROM projects WHERE id = $1`, [
       projectId,
     ]);
@@ -152,6 +159,10 @@ export async function assignEngineer(
     if (user.rows[0].status !== "Active") {
       throw new Error("Cannot assign inactive user");
     }
+    // Only Site Engineer may be assigned as field engineer
+    if (user.rows[0].role !== "Site Engineer") {
+      throw new Error("Only Site Engineer role can be assigned to a project");
+    }
 
     const res = await client.query(
       `INSERT INTO project_assignments (org_id, project_id, user_id, assigned_by)
@@ -163,9 +174,9 @@ export async function assignEngineer(
 
     const row = res.rows[0];
     if (row) {
-      await audit(client, session.user.id, "project", projectId, "engineer_assigned", {
+      await audit(client, session.user.id, "project_assignment", row.id, "create", {
+        project_id: projectId,
         user_id: userId,
-        assignment_id: row.id,
       });
     }
 
@@ -174,7 +185,7 @@ export async function assignEngineer(
 }
 
 export async function listProjects(session: SessionLike) {
-  return withTenant(session, async (_db, client) => {
+  return withTenant(session, async (client) => {
     const res = await client.query(
       `SELECT p.id, p.project_name, p.client_name, p.project_status,
               p.project_priority, p.current_phase, p.po_number, p.created_at,
@@ -191,11 +202,27 @@ export async function listOrgUsers(session: SessionLike) {
   if (session.user.role !== "Admin") {
     throw new Error("Only Admin can list users");
   }
-  return withTenant(session, async (_db, client) => {
+  return withTenant(session, async (client) => {
     const res = await client.query(
       `SELECT id, full_name, username, email, role, status
        FROM users
        WHERE status = 'Active'
+       ORDER BY full_name`
+    );
+    return res.rows;
+  });
+}
+
+/** Engineers only — for assignment dropdown */
+export async function listEngineers(session: SessionLike) {
+  if (session.user.role !== "Admin") {
+    throw new Error("Only Admin can list engineers");
+  }
+  return withTenant(session, async (client) => {
+    const res = await client.query(
+      `SELECT id, full_name, username, email, role, status
+       FROM users
+       WHERE status = 'Active' AND role = 'Site Engineer'
        ORDER BY full_name`
     );
     return res.rows;
