@@ -5,18 +5,16 @@
  * Usage (PowerShell):
  *   $env:DATABASE_URL="postgresql://..."
  *   npx tsx src/scripts/migrate.ts
- *
- * Or create .env.local with DATABASE_URL=...
  */
 
 import { neon } from "@neondatabase/serverless";
 
-// Optional dotenv – works if installed, ignored otherwise
+// Load .env.local if present (no top-level await)
 try {
-  const { config } = await import("dotenv");
-  config({ path: ".env.local" });
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  require("dotenv").config({ path: ".env.local" });
 } catch {
-  // fine – user can set process.env.DATABASE_URL directly
+  // dotenv optional – rely on process.env.DATABASE_URL
 }
 
 async function main() {
@@ -376,7 +374,7 @@ async function main() {
   await sql`GRANT SELECT, INSERT, UPDATE, DELETE ON login_attempts TO app_user`;
   await sql`GRANT SELECT ON organizations TO app_user`;
 
-  console.log("\n✅ Slice 1 foundation migration complete");
+  console.log("\n\u2705 Slice 1 foundation migration complete");
 }
 
 main().catch((e) => {
