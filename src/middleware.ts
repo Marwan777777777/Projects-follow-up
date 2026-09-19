@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { auth } from "./auth";
 import { NextResponse } from "next/server";
 
 export default auth((req) => {
@@ -14,7 +14,8 @@ export default auth((req) => {
     pathname.startsWith("/set-password");
 
   const isChangePassword = pathname.startsWith("/change-password");
-  const isPublic = isAuthPage || pathname === "/" || pathname.startsWith("/api/auth");
+  const isPublic =
+    isAuthPage || pathname === "/" || pathname.startsWith("/api/auth");
 
   if (!isLoggedIn && !isPublic) {
     const loginUrl = new URL("/login", req.url);
@@ -22,7 +23,12 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
-  if (isLoggedIn && mustChange && !isChangePassword && !pathname.startsWith("/api/auth")) {
+  if (
+    isLoggedIn &&
+    mustChange &&
+    !isChangePassword &&
+    !pathname.startsWith("/api/auth")
+  ) {
     return NextResponse.redirect(new URL("/change-password", req.url));
   }
 
