@@ -13,7 +13,11 @@ export default auth((req) => {
     pathname.startsWith("/forgot-password") ||
     pathname.startsWith("/set-password");
 
-  const isChangePassword = pathname.startsWith("/change-password");
+  // Allow both the UI page and the API endpoint through the must-change gate
+  const isChangePassword =
+    pathname.startsWith("/change-password") ||
+    pathname.startsWith("/api/change-password");
+
   const isPublic =
     isAuthPage || pathname === "/" || pathname.startsWith("/api/auth");
 
