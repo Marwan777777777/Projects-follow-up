@@ -8,12 +8,15 @@
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/scripts/migrate.ts && tsx src/scripts/migrate-session-check.ts && tsx src/scripts/migrate-slice3.ts",
+    "db:migrate": "tsx src/scripts/migrate.ts && tsx src/scripts/migrate-session-check.ts && tsx src/scripts/migrate-slice3.ts && tsx src/scripts/migrate-attachments.ts",
     "create-org": "tsx src/scripts/create-org.ts",
     "test:isolation": "tsx src/tests/isolation.test.ts",
-    "test:permissions": "tsx src/tests/permissions.test.ts"
+    "test:permissions": "tsx src/tests/permissions.test.ts",
+    "test:attachments": "STORAGE_DRIVER=dev tsx src/tests/attachments.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "@aws-sdk/s3-request-presigner": "^3.758.0",
     "@neondatabase/serverless": "^1.0.1",
     "bcryptjs": "^3.0.2",
     "drizzle-orm": "^0.44.5",
