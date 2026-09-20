@@ -1,0 +1,49 @@
+{
+  "name": "projects-follow-up",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/scripts/migrate.ts && tsx src/scripts/migrate-session-check.ts && tsx src/scripts/migrate-slice3.ts && tsx src/scripts/migrate-attachments.ts && tsx src/scripts/migrate-hardening.ts",
+    "create-org": "tsx src/scripts/create-org.ts",
+    "test:isolation": "tsx src/tests/isolation.test.ts",
+    "test:permissions": "tsx src/tests/permissions.test.ts",
+    "test:attachments": "tsx src/tests/attachments.test.ts",
+    "test:services": "tsx src/tests/services.test.ts",
+    "test": "tsx src/tests/permissions.test.ts && tsx src/tests/attachments.test.ts && tsx src/tests/isolation.test.ts && tsx src/tests/services.test.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.758.0",
+    "@aws-sdk/s3-request-presigner": "^3.758.0",
+    "@neondatabase/serverless": "^1.0.1",
+    "bcryptjs": "^3.0.2",
+    "drizzle-orm": "^0.44.5",
+    "next": "16.3.5",
+    "next-auth": "5.0.0-beta.32",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "uuid": "^11.1.0",
+    "ws": "^8.18.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.5.13",
+    "dotenv": "^16.5.0",
+    "drizzle-kit": "^0.31.4",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.5",
+    "tailwindcss": "^4",
+    "tsx": "^4.20.3",
+    "typescript": "^5"
+  }
+}
