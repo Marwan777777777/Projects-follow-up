@@ -11,26 +11,17 @@ This file is the authoritative source for implementation.
 - Work on a branch named slice-N. Commit in small steps. Never merge to main yourself.
 - When done, STOP and send the required report format.
 
-## Slice 3 Scope (current)
-Operational loop (internal MVP):
-- Assigned projects for Site Engineers
-- Daily update (installed qty, status, phase, notes, no-change)
-- Client-generated submission_id + fingerprint idempotency
-- Local draft persistence; 72h offline window
-- Blocker raise / resolve
-- Activity / history feeds
-- Admin dashboard KPIs (Active = In Progress + Delayed, BOQ install rate, At-Risk)
-- Permission layer (no scattered role checks in new code)
-- Additive schema: submissions, blockers, activity_event function
+## Slice 3 Scope (hardening complete)
+Operational loop + attachments + post-slice hardening:
+- GRANT app_user membership is migration-time, not per request
+- Single `append_activity_log` reads actor from `app.current_user_id`
+- Race-safe submission insert (`ON CONFLICT (org_id, id)`)
+- Composite FKs to users; CHECKs on kind / severity / status
+- Neon tests: two-org isolation through services, idempotency, engineer scoping
 
-Still later: R2 attachments, cron/compliance emails, PDF export.
-
-## Assumptions stated (12.7) for this slice
-- Out-of-window timestamps are **rejected** with a recoverable error (stale-draft "submit as today" path).
-- Submission kind for project creation / admin resolve = `admin_edit`; blocker raise = `blocker`.
-- Zero-PO BOQ lines excluded from install-rate denominator.
-- Blocker-only activity does **not** increment revision (no revision UI yet).
-- Dedicated transaction for pre-auth functions remains caller-managed (existing).
-- Session revalidation uses `auth_session_check` SECURITY DEFINER (existing).
-- Admin phone More includes Sign out.
-- Platform admin bootstrap still deferred.
+## Slice 4 Scope (next)
+Admin monitoring:
+- Dashboard filters/search, At-Risk (exact §9.6), compliance widget
+- Blocker log filters, Activity feed (engineer filter, old vs new)
+- Project drill-down, PDF export, visibility-aware polling (§8.13)
+- PHASE_LABELS everywhere

@@ -52,12 +52,8 @@ export async function withOrgContext<T>(
   try {
     await client.query("BEGIN");
 
-    // Ensure we can assume app_user (owner must be a member)
-    await client.query(`GRANT app_user TO CURRENT_USER`).catch(() => {
-      /* already granted */
-    });
-
-    // FORCE RLS only applies once we are not the bypassing owner
+    // Membership is granted once in migrate-hardening.ts (GRANT app_user TO login role).
+    // FORCE RLS only applies once we are not the bypassing owner.
     await client.query(`SET LOCAL ROLE app_user`);
 
     // Transaction-local tenant context
