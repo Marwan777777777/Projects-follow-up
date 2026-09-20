@@ -1,6 +1,7 @@
 /**
- * Single audit helper. Actor is taken from app.current_user_id inside
- * append_activity_log — never from client input.
+ * Single audit helper.
+ * Actor is read inside append_activity_log from app.current_user_id GUC.
+ * Never pass actor from client / service payload.
  */
 import type { PoolClient } from "@neondatabase/serverless";
 
