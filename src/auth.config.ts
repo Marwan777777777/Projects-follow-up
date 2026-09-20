@@ -54,14 +54,12 @@ export const authConfig = {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id!;
-        token.orgId = (user as { orgId: string }).orgId;
-        token.orgSlug = (user as { orgSlug: string }).orgSlug;
-        token.role = (user as { role: string }).role;
-        token.tokenVersion = (user as { tokenVersion: number }).tokenVersion;
-        token.mustChangePassword = (
-          user as { mustChangePassword: boolean }
-        ).mustChangePassword;
-        token.fullName = (user as { fullName: string }).fullName;
+        token.orgId = user.orgId;
+        token.orgSlug = user.orgSlug;
+        token.role = user.role;
+        token.tokenVersion = user.tokenVersion;
+        token.mustChangePassword = user.mustChangePassword;
+        token.fullName = user.fullName;
       }
       return token;
     },
@@ -69,17 +67,14 @@ export const authConfig = {
       if (!token.id || !token.orgId) {
         return { ...session, user: undefined as never };
       }
-      session.user = {
-        id: token.id as string,
-        orgId: token.orgId as string,
-        orgSlug: token.orgSlug as string,
-        role: token.role as "Admin" | "Site Engineer",
-        tokenVersion: token.tokenVersion as number,
-        mustChangePassword: token.mustChangePassword as boolean,
-        fullName: token.fullName as string,
-        name: token.fullName as string,
-        email: session.user?.email ?? null,
-      };
+      session.user.id = token.id;
+      session.user.orgId = token.orgId;
+      session.user.orgSlug = token.orgSlug;
+      session.user.role = token.role;
+      session.user.tokenVersion = token.tokenVersion;
+      session.user.mustChangePassword = token.mustChangePassword;
+      session.user.fullName = token.fullName;
+      session.user.name = token.fullName;
       return session;
     },
   },
