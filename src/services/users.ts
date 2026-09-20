@@ -6,6 +6,7 @@ import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import type { PoolClient } from "@neondatabase/serverless";
 import { withTenant, type SessionLike } from "@/db/tenant";
+import { assertPermission } from "@/lib/permissions";
 
 async function audit(
   client: PoolClient,
@@ -25,17 +26,22 @@ export async function createEngineer(
   session: SessionLike,
   input: { fullName: string; username: string; email?: string }
 ) {
-  if (session.user.role !== "Admin") {
-    throw new Error("Only Admin can create users");
-  }
+  assertPermission(session.user.role, "users.manage");
 
   const fullName = input.fullName.trim();
   const username = input.username.trim().toLowerCase();
+  const email = input.email?.trim().toLowerCase() || "";
   if (!fullName || !username) {
     throw new Error("fullName and username are required");
   }
   if (username.includes("@")) {
     throw new Error("Username must not contain @");
+  }
+  if (username.length < 3) {
+    throw new Error("Username must be at least 3 characters");
+  }
+  if (!email || !email.includes("@")) {
+    throw new Error("Active Site Engineer requires a valid email");
   }
 
   const tempPassword = randomBytes(9).toString("base64url");
@@ -52,7 +58,7 @@ export async function createEngineer(
         fullName,
         username,
         passwordHash,
-        input.email?.trim().toLowerCase() || null,
+        email,
       ]
     );
     const user = res.rows[0];

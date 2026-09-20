@@ -45,7 +45,7 @@ async function main() {
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'public'
-        AND c.relname IN ('users', 'projects', 'boq_items', 'activity_log', 'project_assignments')
+        AND c.relname IN ('users', 'projects', 'boq_items', 'activity_log', 'project_assignments', 'submissions', 'blockers')
       ORDER BY c.relname
     `;
     console.log("RLS status:");

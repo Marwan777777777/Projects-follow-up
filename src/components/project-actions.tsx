@@ -27,7 +27,9 @@ export function ProjectActions({ projectId }: { projectId: string }) {
 
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [tempPass, setTempPass] = useState("");
+  const [deliveredQty, setDeliveredQty] = useState("1");
 
   useEffect(() => {
     if (mode === "assign") {
@@ -56,7 +58,15 @@ export function ProjectActions({ projectId }: { projectId: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: [{ itemNo, itemDescription: desc, unit, poQty: qty }],
+          items: [
+            {
+              itemNo,
+              itemDescription: desc,
+              unit,
+              poQty: qty,
+              deliveredQty: Number(deliveredQty),
+            },
+          ],
         }),
       });
       const data = await res.json();
@@ -108,7 +118,7 @@ export function ProjectActions({ projectId }: { projectId: string }) {
       const res = await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, username }),
+        body: JSON.stringify({ fullName, username, email }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -206,6 +216,15 @@ export function ProjectActions({ projectId }: { projectId: string }) {
               required
               className="w-24 rounded border px-2 py-1"
             />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Delivered"
+              value={deliveredQty}
+              onChange={(e) => setDeliveredQty(e.target.value)}
+              className="w-24 rounded border px-2 py-1"
+            />
             <button
               type="submit"
               disabled={loading}
@@ -259,6 +278,14 @@ export function ProjectActions({ projectId }: { projectId: string }) {
             placeholder="Username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            required
+            className="w-full rounded border px-2 py-1"
+          />
+          <input
+            type="email"
+            placeholder="Email (required)"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             required
             className="w-full rounded border px-2 py-1"
           />

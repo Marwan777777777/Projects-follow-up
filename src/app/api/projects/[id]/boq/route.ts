@@ -1,5 +1,6 @@
 import { auth } from "@/auth";
 import { addBoqItems } from "@/services/projects";
+import { asSession } from "@/lib/session";
 import { NextResponse } from "next/server";
 
 export async function POST(
@@ -10,12 +11,17 @@ export async function POST(
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (session.user.role !== "Admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const { id: projectId } = await params;
-  let body: { items?: Array<{ itemNo: string; itemDescription: string; unit?: string; poQty: number }> };
+  let body: {
+    items?: Array<{
+      itemNo: string;
+      itemDescription: string;
+      unit?: string;
+      poQty: number;
+      deliveredQty?: number;
+    }>;
+  };
   try {
     body = await req.json();
   } catch {
@@ -23,18 +29,7 @@ export async function POST(
   }
 
   try {
-    const items = await addBoqItems(
-      {
-        user: {
-          id: session.user.id,
-          orgId: session.user.orgId,
-          role: session.user.role,
-          tokenVersion: session.user.tokenVersion,
-        },
-      },
-      projectId,
-      body.items || []
-    );
+    const items = await addBoqItems(asSession(session), projectId, body.items || []);
     return NextResponse.json({ items }, { status: 201 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to add BOQ";

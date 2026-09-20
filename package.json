@@ -8,9 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/scripts/migrate.ts",
+    "db:migrate": "tsx src/scripts/migrate.ts && tsx src/scripts/migrate-session-check.ts && tsx src/scripts/migrate-slice3.ts",
     "create-org": "tsx src/scripts/create-org.ts",
-    "test:isolation": "tsx src/tests/isolation.test.ts"
+    "test:isolation": "tsx src/tests/isolation.test.ts",
+    "test:permissions": "tsx src/tests/permissions.test.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.1",

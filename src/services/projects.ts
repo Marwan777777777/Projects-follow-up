@@ -4,6 +4,7 @@
  */
 
 import type { PoolClient } from "@neondatabase/serverless";
+import { assertPermission } from "@/lib/permissions";
 import { withTenant, type SessionLike } from "@/db/tenant";
 
 export type CreateProjectInput = {
@@ -21,6 +22,7 @@ export type BoqLineInput = {
   itemDescription: string;
   unit?: string;
   poQty: number;
+  deliveredQty?: number;
   sortOrder?: number;
 };
 
@@ -42,9 +44,7 @@ export async function createProject(
   session: SessionLike,
   input: CreateProjectInput
 ) {
-  if (session.user.role !== "Admin") {
-    throw new Error("Only Admin can create projects");
-  }
+  assertPermission(session.user.role, "projects.create");
 
   const name = input.projectName?.trim();
   const clientName = input.clientName?.trim();
@@ -72,6 +72,15 @@ export async function createProject(
     );
     const project = res.rows[0];
 
+    await client.query(
+      `INSERT INTO submissions (
+         id, org_id, project_id, user_id, kind, request_fingerprint, notes, no_change
+       ) VALUES (gen_random_uuid(), $1, $2, $3, 'admin_edit', $4, 'project created', false)`,
+      [session.user.orgId, project.id, session.user.id, `create:${project.id}`]
+    ).catch(() => {
+      /* submissions table may not exist until slice-3 migrate */
+    });
+
     await audit(client, session.user.id, "project", project.id, "create", {
       project_name: project.project_name,
       client_name: project.client_name,
@@ -86,9 +95,7 @@ export async function addBoqItems(
   projectId: string,
   items: BoqLineInput[]
 ) {
-  if (session.user.role !== "Admin") {
-    throw new Error("Only Admin can add BOQ items");
-  }
+  assertPermission(session.user.role, "boq.update_all");
   if (!items.length) throw new Error("At least one BOQ item required");
 
   return withTenant(session, async (client) => {
@@ -101,22 +108,28 @@ export async function addBoqItems(
     for (let i = 0; i < items.length; i++) {
       const line = items[i];
       const qty = Number(line.poQty);
+      const delivered =
+        line.deliveredQty == null ? qty : Number(line.deliveredQty);
       if (!Number.isFinite(qty) || qty < 0) {
         throw new Error(`Invalid poQty for item ${line.itemNo}`);
       }
+      if (!Number.isFinite(delivered) || delivered < 0 || delivered > qty) {
+        throw new Error(`Invalid deliveredQty for item ${line.itemNo}`);
+      }
       const r = await client.query(
         `INSERT INTO boq_items (
-           org_id, project_id, sort_order, item_no, item_description, unit, po_qty
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, item_no, item_description, unit, po_qty`,
+           org_id, project_id, sort_order, item_no, item_description, unit, po_qty, delivered_qty
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING id, item_no, item_description, unit, po_qty, delivered_qty`,
         [
           session.user.orgId,
           projectId,
           line.sortOrder ?? i,
           line.itemNo.trim(),
           line.itemDescription.trim(),
-          line.unit || "EA",
+          line.unit || "nos",
           qty,
+          delivered,
         ]
       );
       const row = r.rows[0];
@@ -141,9 +154,7 @@ export async function assignEngineer(
   projectId: string,
   userId: string
 ) {
-  if (session.user.role !== "Admin") {
-    throw new Error("Only Admin can assign engineers");
-  }
+  assertPermission(session.user.role, "assignments.manage");
 
   return withTenant(session, async (client) => {
     const proj = await client.query(`SELECT id FROM projects WHERE id = $1`, [
@@ -186,22 +197,29 @@ export async function assignEngineer(
 
 export async function listProjects(session: SessionLike) {
   return withTenant(session, async (client) => {
+    const params: unknown[] = [];
+    const join =
+      session.user.role === "Site Engineer"
+        ? "JOIN project_assignments a ON a.project_id = p.id AND a.user_id = $1"
+        : "";
+    if (session.user.role === "Site Engineer") params.push(session.user.id);
     const res = await client.query(
       `SELECT p.id, p.project_name, p.client_name, p.project_status,
               p.project_priority, p.current_phase, p.po_number, p.created_at,
               (SELECT count(*)::int FROM boq_items b WHERE b.project_id = p.id) AS boq_count,
-              (SELECT count(*)::int FROM project_assignments a WHERE a.project_id = p.id) AS assignee_count
+              (SELECT count(*)::int FROM project_assignments a2 WHERE a2.project_id = p.id) AS assignee_count
        FROM projects p
-       ORDER BY p.created_at DESC`
+       ${join}
+       WHERE p.archived_at IS NULL
+       ORDER BY p.created_at DESC`,
+      params
     );
     return res.rows;
   });
 }
 
 export async function listOrgUsers(session: SessionLike) {
-  if (session.user.role !== "Admin") {
-    throw new Error("Only Admin can list users");
-  }
+  assertPermission(session.user.role, "users.manage");
   return withTenant(session, async (client) => {
     const res = await client.query(
       `SELECT id, full_name, username, email, role, status
@@ -215,9 +233,7 @@ export async function listOrgUsers(session: SessionLike) {
 
 /** Engineers only — for assignment dropdown */
 export async function listEngineers(session: SessionLike) {
-  if (session.user.role !== "Admin") {
-    throw new Error("Only Admin can list engineers");
-  }
+  assertPermission(session.user.role, "assignments.manage");
   return withTenant(session, async (client) => {
     const res = await client.query(
       `SELECT id, full_name, username, email, role, status

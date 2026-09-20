@@ -109,6 +109,7 @@ export const boqItems = pgTable(
     poQty: numeric("po_qty", { precision: 12, scale: 2 }).notNull().default("0"),
     deliveredQty: numeric("delivered_qty", { precision: 12, scale: 2 }).notNull().default("0"),
     installedQty: numeric("installed_qty", { precision: 12, scale: 2 }).notNull().default("0"),
+    notes: text("notes"),
     version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -120,11 +121,62 @@ export const activityLog = pgTable("activity_log", {
   id: uuid("id").primaryKey().defaultRandom(),
   orgId: uuid("org_id").notNull(),
   actorId: uuid("actor_id"),
+  projectId: uuid("project_id"),
+  submissionId: uuid("submission_id"),
   entityType: text("entity_type").notNull(),
   entityId: uuid("entity_id"),
   action: text("action").notNull(),
+  field: text("field"),
+  oldValue: text("old_value"),
+  newValue: text("new_value"),
   oldValues: jsonb("old_values"),
   newValues: jsonb("new_values"),
   metadata: jsonb("metadata"),
+  timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const submissions = pgTable(
+  "submissions",
+  {
+    id: uuid("id").notNull(),
+    orgId: uuid("org_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    kind: text("kind").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+    clientSubmittedAt: timestamp("client_submitted_at", { withTimezone: true }),
+    requestFingerprint: text("request_fingerprint").notNull(),
+    notes: text("notes"),
+    noChange: boolean("no_change").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("submissions_org_id_id_idx").on(t.orgId, t.id),
+    index("submissions_org_project_idx").on(t.orgId, t.projectId),
+  ]
+);
+
+export const blockers = pgTable(
+  "blockers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    raisedBy: uuid("raised_by").notNull(),
+    description: text("description").notNull(),
+    severity: text("severity").notNull(),
+    status: text("status").notNull().default("Open"),
+    raisedAt: timestamp("raised_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: uuid("resolved_by"),
+    resolutionNote: text("resolution_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("blockers_org_id_id_idx").on(t.orgId, t.id),
+    index("blockers_org_project_idx").on(t.orgId, t.projectId),
+  ]
+);
