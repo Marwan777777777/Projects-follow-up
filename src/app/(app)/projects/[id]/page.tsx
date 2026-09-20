@@ -60,7 +60,8 @@ export default async function AdminProjectPage({
               <p className="text-xs text-zinc-500">{String(row.item_no)}</p>
               <p className="font-medium">{String(row.item_description)}</p>
               <p className="mt-1 text-xs text-zinc-500">
-                {row.installed_qty} / {row.delivered_qty} / {row.po_qty} {String(row.unit)}
+                {String(row.installed_qty)} / {String(row.delivered_qty)} / {String(row.po_qty)}{" "}
+                {String(row.unit)}
               </p>
             </div>
           ))}
