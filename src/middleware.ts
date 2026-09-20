@@ -1,49 +1,7 @@
-import { auth } from "./auth";
-import { NextResponse } from "next/server";
+import NextAuth from "next-auth";
+import { authConfig } from "./auth.config";
 
-export default auth((req) => {
-  const { pathname } = req.nextUrl;
-  const session = req.auth;
-
-  const isLoggedIn = !!session?.user?.id;
-  const mustChange = session?.user?.mustChangePassword === true;
-
-  const isAuthPage =
-    pathname.startsWith("/login") ||
-    pathname.startsWith("/forgot-password") ||
-    pathname.startsWith("/set-password");
-
-  // Allow both the UI page and the API endpoint through the must-change gate
-  const isChangePassword =
-    pathname.startsWith("/change-password") ||
-    pathname.startsWith("/api/change-password");
-
-  const isPublic =
-    isAuthPage || pathname === "/" || pathname.startsWith("/api/auth");
-
-  if (!isLoggedIn && !isPublic) {
-    const loginUrl = new URL("/login", req.url);
-    loginUrl.searchParams.set("callbackUrl", pathname);
-    return NextResponse.redirect(loginUrl);
-  }
-
-  if (
-    isLoggedIn &&
-    mustChange &&
-    !isChangePassword &&
-    !pathname.startsWith("/api/auth")
-  ) {
-    return NextResponse.redirect(new URL("/change-password", req.url));
-  }
-
-  if (isLoggedIn && isAuthPage && !mustChange) {
-    const role = session?.user?.role;
-    const dest = role === "Site Engineer" ? "/my-projects" : "/dashboard";
-    return NextResponse.redirect(new URL(dest, req.url));
-  }
-
-  return NextResponse.next();
-});
+export default NextAuth(authConfig).auth;
 
 export const config = {
   matcher: [

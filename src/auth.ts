@@ -4,6 +4,8 @@
  *
  * Kill-switch path: auth_session_check (SECURITY DEFINER).
  * Never query users/organizations directly from app code for revocation.
+ *
+ * Node-only file. Middleware uses auth.config.ts (Edge-safe).
  */
 
 import NextAuth from "next-auth";
@@ -11,6 +13,7 @@ import Credentials from "next-auth/providers/credentials";
 import { neon } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { authConfig } from "./auth.config";
 
 const loginSchema = z.object({
   orgSlug: z.string().min(1),
@@ -108,6 +111,7 @@ async function sessionCheck(
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  ...authConfig,
   providers: [
     Credentials({
       name: "credentials",
@@ -147,15 +151,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
     }),
   ],
-  session: {
-    strategy: "jwt",
-    maxAge: 7 * 24 * 60 * 60,
-  },
-  pages: {
-    signIn: "/login",
-    error: "/login",
-  },
   callbacks: {
+    ...authConfig.callbacks,
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id!;
@@ -176,7 +173,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           );
 
           if (!row || !row.ok) {
-            // Invalidate — disabled user, suspended org, or token_version mismatch
             return { ...token, id: "", orgId: "" } as typeof token;
           }
 
@@ -185,30 +181,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           token.orgSlug = row.org_slug;
           if (row.full_name) token.fullName = row.full_name;
         } catch {
-          // Fail closed on unexpected errors: invalidate session
           return { ...token, id: "", orgId: "" } as typeof token;
         }
       }
 
       return token;
     },
-    async session({ session, token }) {
-      if (!token.id || !token.orgId) {
-        return { ...session, user: undefined as never };
-      }
-      session.user = {
-        id: token.id,
-        orgId: token.orgId,
-        orgSlug: token.orgSlug,
-        role: token.role,
-        tokenVersion: token.tokenVersion,
-        mustChangePassword: token.mustChangePassword,
-        fullName: token.fullName,
-        name: token.fullName,
-        email: session.user?.email ?? null,
-      };
-      return session;
-    },
   },
-  trustHost: true,
 });
