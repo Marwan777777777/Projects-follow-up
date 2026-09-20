@@ -630,16 +630,50 @@ export async function dashboardStats(session: SessionLike) {
       `SELECT
          count(*) FILTER (WHERE archived_at IS NULL)::int AS total,
          count(*) FILTER (WHERE archived_at IS NULL AND project_status IN ('In Progress','Delayed'))::int AS active,
+         count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'In Progress')::int AS in_progress,
+         count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'Delayed')::int AS delayed,
          count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'On Hold')::int AS on_hold,
          count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'Completed')::int AS completed
        FROM projects`
     );
-    const openBlockers = await client.query(
-      `SELECT count(*)::int AS c FROM blockers WHERE status = 'Open'`
+
+    const boq = await client.query(
+      `SELECT
+         count(*) FILTER (WHERE po_qty > 0)::int AS lines,
+         count(*) FILTER (WHERE po_qty > 0 AND installed_qty >= po_qty)::int AS fully_installed,
+         COALESCE(avg(LEAST(installed_qty / NULLIF(po_qty, 0), 1)) FILTER (WHERE po_qty > 0), 0) AS install_rate
+       FROM boq_items b
+       JOIN projects p ON p.id = b.project_id
+       WHERE p.archived_at IS NULL`
     );
+
+    const atRisk = await client.query(
+      `SELECT p.id, p.project_name, p.project_status, p.project_priority,
+              (SELECT count(*)::int FROM blockers k WHERE k.project_id = p.id AND k.status = 'Open' AND k.severity = 'High') AS high_blockers
+       FROM projects p
+       WHERE p.archived_at IS NULL
+         AND (
+           p.project_status = 'Delayed'
+           OR EXISTS (SELECT 1 FROM blockers k WHERE k.project_id = p.id AND k.status = 'Open' AND k.severity = 'High')
+           OR (p.project_priority = 'High' AND p.project_status = 'On Hold')
+         )
+       ORDER BY p.project_name
+       LIMIT 20`
+    );
+
+    const recent = await client.query(
+      `SELECT p.id, p.project_name, p.project_status, p.current_phase, p.project_priority
+       FROM projects p
+       WHERE p.archived_at IS NULL
+       ORDER BY p.updated_at DESC
+       LIMIT 8`
+    );
+
     return {
-      projects: counts.rows[0],
-      openBlockers: openBlockers.rows[0]?.c ?? 0,
+      counts: counts.rows[0],
+      boq: boq.rows[0],
+      atRisk: atRisk.rows,
+      recent: recent.rows,
     };
   });
 }
