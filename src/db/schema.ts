@@ -180,3 +180,29 @@ export const blockers = pgTable(
     index("blockers_org_project_idx").on(t.orgId, t.projectId),
   ]
 );
+
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").notNull().defaultRandom(),
+    orgId: uuid("org_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    submissionId: uuid("submission_id"),
+    blockerId: uuid("blocker_id"),
+    r2Key: text("r2_key").notNull(),
+    fileName: text("file_name").notNull(),
+    fileType: text("file_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    status: text("status").notNull().default("pending"),
+    uploadedBy: uuid("uploaded_by").notNull(),
+    uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    multipartUploadId: text("multipart_upload_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("attachments_org_id_id_idx").on(t.orgId, t.id),
+    index("attachments_org_project_status_idx").on(t.orgId, t.projectId, t.status),
+  ]
+);
