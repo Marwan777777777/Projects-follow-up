@@ -10,6 +10,7 @@ import { assertPermission } from "@/lib/permissions";
 import { requestFingerprint } from "@/lib/fingerprint";
 import { AppError } from "@/lib/errors";
 import { FUTURE_SKEW_MS, OFFLINE_WINDOW_MS } from "@/lib/constants";
+import { linkAttachmentsToSubmission } from "@/services/attachments";
 
 async function auditEvent(
   client: PoolClient,
@@ -75,6 +76,7 @@ export type DailyUpdateInput = {
   currentPhase?: string;
   clientSubmittedAt?: string;
   boq?: Array<{ id: string; installedQty: number; version: number }>;
+  attachmentIds?: string[];
 };
 
 function validateClientTime(iso?: string): Date | null {
@@ -105,6 +107,7 @@ export async function submitDailyUpdate(session: SessionLike, input: DailyUpdate
   if (!projectId) throw new AppError(400, "projectId is required");
 
   const clientTs = validateClientTime(input.clientSubmittedAt);
+  const attachmentIds = [...new Set((input.attachmentIds || []).filter(Boolean))].sort();
 
   const fingerprintPayload = {
     submission_id: submissionId,
@@ -123,6 +126,7 @@ export async function submitDailyUpdate(session: SessionLike, input: DailyUpdate
         version: b.version,
       }))
       .sort((a, b) => a.id.localeCompare(b.id)),
+    attachment_ids: attachmentIds,
   };
   const fingerprint = requestFingerprint(fingerprintPayload);
 
@@ -316,6 +320,16 @@ export async function submitDailyUpdate(session: SessionLike, input: DailyUpdate
       });
     }
 
+    if (attachmentIds.length) {
+      await linkAttachmentsToSubmission(client, {
+        orgId: session.user.orgId,
+        userId: session.user.id,
+        projectId,
+        submissionId,
+        attachmentIds,
+      });
+    }
+
     return { ok: true, replay: false, submissionId };
   });
 }
@@ -326,6 +340,7 @@ export async function raiseBlocker(
     projectId: string;
     description: string;
     severity: "Low" | "Medium" | "High";
+    attachmentIds?: string[];
   }
 ) {
   assertPermission(session.user.role, "blockers.create");
@@ -336,6 +351,7 @@ export async function raiseBlocker(
   }
 
   const submissionId = randomUUID();
+  const attachmentIds = [...new Set((input.attachmentIds || []).filter(Boolean))];
 
   return withTenant(session, async (client) => {
     await assertAssigned(client, input.projectId, session.user.id, session.user.role);
@@ -354,6 +370,7 @@ export async function raiseBlocker(
       blocker_id: row.id,
       project_id: input.projectId,
       user_id: session.user.id,
+      attachment_ids: attachmentIds,
     });
 
     await client.query(
@@ -362,6 +379,17 @@ export async function raiseBlocker(
        ) VALUES ($1,$2,$3,$4,'blocker',$5,$6,false)`,
       [submissionId, session.user.orgId, input.projectId, session.user.id, fp, description]
     );
+
+    if (attachmentIds.length) {
+      await linkAttachmentsToSubmission(client, {
+        orgId: session.user.orgId,
+        userId: session.user.id,
+        projectId: input.projectId,
+        submissionId,
+        attachmentIds,
+        blockerId: row.id,
+      });
+    }
 
     await auditEvent(client, {
       actorId: session.user.id,
@@ -508,12 +536,23 @@ export async function getProjectDetail(session: SessionLike, projectId: string) 
       [projectId]
     );
 
+    const attachments = await client.query(
+      `SELECT id, file_name, file_type, size_bytes, status, uploaded_at, created_at,
+              submission_id, blocker_id
+       FROM attachments
+       WHERE project_id = $1 AND status = 'ready' AND deleted_at IS NULL
+       ORDER BY coalesce(uploaded_at, created_at) DESC
+       LIMIT 100`,
+      [projectId]
+    );
+
     return {
       project: proj.rows[0],
       boq: boq.rows,
       assignees: assignees.rows,
       blockers: blockers.rows,
       history: history.rows,
+      attachments: attachments.rows,
     };
   });
 }
@@ -591,50 +630,16 @@ export async function dashboardStats(session: SessionLike) {
       `SELECT
          count(*) FILTER (WHERE archived_at IS NULL)::int AS total,
          count(*) FILTER (WHERE archived_at IS NULL AND project_status IN ('In Progress','Delayed'))::int AS active,
-         count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'In Progress')::int AS in_progress,
-         count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'Delayed')::int AS delayed,
          count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'On Hold')::int AS on_hold,
          count(*) FILTER (WHERE archived_at IS NULL AND project_status = 'Completed')::int AS completed
        FROM projects`
     );
-
-    const boq = await client.query(
-      `SELECT
-         count(*) FILTER (WHERE po_qty > 0)::int AS lines,
-         count(*) FILTER (WHERE po_qty > 0 AND installed_qty >= po_qty)::int AS fully_installed,
-         COALESCE(avg(LEAST(installed_qty / NULLIF(po_qty, 0), 1)) FILTER (WHERE po_qty > 0), 0) AS install_rate
-       FROM boq_items b
-       JOIN projects p ON p.id = b.project_id
-       WHERE p.archived_at IS NULL`
+    const openBlockers = await client.query(
+      `SELECT count(*)::int AS c FROM blockers WHERE status = 'Open'`
     );
-
-    const atRisk = await client.query(
-      `SELECT p.id, p.project_name, p.project_status, p.project_priority,
-              (SELECT count(*)::int FROM blockers k WHERE k.project_id = p.id AND k.status = 'Open' AND k.severity = 'High') AS high_blockers
-       FROM projects p
-       WHERE p.archived_at IS NULL
-         AND (
-           p.project_status = 'Delayed'
-           OR EXISTS (SELECT 1 FROM blockers k WHERE k.project_id = p.id AND k.status = 'Open' AND k.severity = 'High')
-           OR (p.project_priority = 'High' AND p.project_status = 'On Hold')
-         )
-       ORDER BY p.project_name
-       LIMIT 20`
-    );
-
-    const recent = await client.query(
-      `SELECT p.id, p.project_name, p.project_status, p.current_phase, p.project_priority
-       FROM projects p
-       WHERE p.archived_at IS NULL
-       ORDER BY p.updated_at DESC
-       LIMIT 8`
-    );
-
     return {
-      counts: counts.rows[0],
-      boq: boq.rows[0],
-      atRisk: atRisk.rows,
-      recent: recent.rows,
+      projects: counts.rows[0],
+      openBlockers: openBlockers.rows[0]?.c ?? 0,
     };
   });
 }
