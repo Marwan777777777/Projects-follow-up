@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { AttachmentUploader } from "@/components/attachment-uploader";
 
 export function BlockerForm({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -10,6 +11,7 @@ export function BlockerForm({ projectId }: { projectId: string }) {
   const [severity, setSeverity] = useState<"Low" | "Medium" | "High">("Medium");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -19,7 +21,7 @@ export function BlockerForm({ projectId }: { projectId: string }) {
       const res = await fetch("/api/blockers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId, description, severity }),
+        body: JSON.stringify({ projectId, description, severity, attachmentIds }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -28,6 +30,7 @@ export function BlockerForm({ projectId }: { projectId: string }) {
         return;
       }
       setDescription("");
+      setAttachmentIds([]);
       setOpen(false);
       router.refresh();
     } catch {
@@ -75,6 +78,9 @@ export function BlockerForm({ projectId }: { projectId: string }) {
               {s}
             </button>
           ))}
+        </div>
+        <div className="mt-4">
+          <AttachmentUploader projectId={projectId} onReadyIdsChange={setAttachmentIds} />
         </div>
         {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
         <div className="mt-auto flex gap-2 pt-6 lg:mt-6">

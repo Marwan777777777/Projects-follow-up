@@ -4,6 +4,7 @@ import { asSession } from "@/lib/session";
 import { getProjectDetail } from "@/services/submissions";
 import { DailyUpdateForm } from "@/components/daily-update-form";
 import { BlockerForm } from "@/components/blocker-form";
+import { AttachmentList } from "@/components/attachment-list";
 import Link from "next/link";
 
 export default async function EngineerProjectPage({
@@ -56,6 +57,11 @@ export default async function EngineerProjectPage({
           boq={detail.boq as never}
           storageKey={storageKey}
         />
+      </section>
+
+      <section>
+        <h2 className="mb-3 font-semibold">Attachments</h2>
+        <AttachmentList attachments={(detail.attachments as never) || []} />
       </section>
 
       <section>
