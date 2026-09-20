@@ -136,7 +136,7 @@ export async function requestUpload(
   const ext = extensionOf(filename);
   const limit = sizeLimitFor(ext);
   if (limit == null) {
-    throw new AppError(400, `File type ".${ext || "?"}" is not allowed");
+    throw new AppError(400, `File type ".${ext || "?"}" is not allowed`);
   }
 
   const sizeBytes = Number(input.sizeBytes);
