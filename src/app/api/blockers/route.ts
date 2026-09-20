@@ -27,7 +27,12 @@ export async function POST(req: Request) {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  let body: { projectId?: string; description?: string; severity?: "Low" | "Medium" | "High" };
+  let body: {
+    projectId?: string;
+    description?: string;
+    severity?: "Low" | "Medium" | "High";
+    attachmentIds?: string[];
+  };
   try {
     body = await req.json();
   } catch {
@@ -38,6 +43,7 @@ export async function POST(req: Request) {
       projectId: body.projectId || "",
       description: body.description || "",
       severity: body.severity || "Medium",
+      attachmentIds: body.attachmentIds,
     });
     return NextResponse.json({ blocker }, { status: 201 });
   } catch (e) {
