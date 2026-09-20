@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { AttachmentUploader } from "@/components/attachment-uploader";
 
 type BoqRow = {
   id: string;
@@ -40,6 +41,7 @@ export function DailyUpdateForm({ projectId, status, phase, boq, storageKey }: P
   const [msg, setMsg] = useState("");
   const [loading, setLoading] = useState(false);
   const [conflicts, setConflicts] = useState<Array<{ id: string; item_no: string; latest: { installed_qty: string; version: number } }>>([]);
+  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
 
   const submissionId = useMemo(() => {
     if (typeof window === "undefined") return newId();
@@ -93,6 +95,7 @@ export function DailyUpdateForm({ projectId, status, phase, boq, storageKey }: P
             installedQty: Number(qty[row.id] ?? row.installed_qty),
             version: row.version,
           })),
+      attachmentIds,
     };
     try {
       const res = await fetch("/api/submissions", {
@@ -117,7 +120,7 @@ export function DailyUpdateForm({ projectId, status, phase, boq, storageKey }: P
       setMsg(data.replay ? "Already saved (retry matched)." : noChange ? "No-change check-in saved." : "Daily update saved.");
       router.refresh();
     } catch {
-      setError("Not saved — retry. Your draft is kept.");
+      setError("Not saved \u2014 retry. Your draft is kept.");
     }
     setLoading(false);
   }
@@ -223,6 +226,8 @@ export function DailyUpdateForm({ projectId, status, phase, boq, storageKey }: P
         </table>
       </div>
 
+      <AttachmentUploader projectId={projectId} onReadyIdsChange={setAttachmentIds} />
+
       <label className="block text-sm">
         Notes
         <textarea
@@ -247,7 +252,7 @@ export function DailyUpdateForm({ projectId, status, phase, boq, storageKey }: P
           onClick={() => save(false)}
           className="min-h-11 flex-1 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white disabled:opacity-60"
         >
-          {loading ? "Saving…" : "Save update"}
+          {loading ? "Saving\u2026" : "Save update"}
         </button>
         <button
           type="button"
